@@ -46,3 +46,4 @@ def get_movie_summary():
         })
     else:
         raise HTTPException(status_code=404, detail="data.json not found")
+
