@@ -80,8 +80,10 @@ app.add_middleware(
 
 
 # ---------------- ROUTES ----------------
+# ---------------- ROUTES ----------------
 @app.get("/movie-summary")
 def get_movie_summary():
+    """Serve processed data.json"""
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -92,3 +94,22 @@ def get_movie_summary():
         })
     else:
         raise HTTPException(status_code=404, detail="data.json not found")
+
+
+@app.get("/raw-movie-summary")
+def get_raw_movie_summary():
+    """Serve raw movie_summary.json file"""
+    raw_file = os.path.join(BASE_PATH, "movie_summary.json")
+
+    if os.path.exists(raw_file):
+        with open(raw_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        return JSONResponse({
+            "last_updated": datetime.now().strftime("%d/%m/%Y, %I:%M:%S %p"),
+            "data": data
+        })
+    else:
+        raise HTTPException(status_code=404, detail="movie_summary.json not found")
+
+
