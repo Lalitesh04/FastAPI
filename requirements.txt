@@ -1,3 +1,5 @@
-Flask
+fastapi
+unicorn
 pandas
 cloudscraper
+
