@@ -20,7 +20,7 @@ TEMP_FILES = [
     os.path.join(BASE_PATH, "processed_venues.json")
 ]
 
-SCRAPER_INTERVAL = 20 * 60  # 1 minute
+SCRAPER_INTERVAL = 60 * 60  # 1 hour
 
 
 # ---------------- FUNCTIONS ----------------
@@ -95,3 +95,4 @@ def get_movie_summary():
         })
     else:
         raise HTTPException(status_code=404, detail="data.json not found")
+
