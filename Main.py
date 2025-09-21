@@ -10,15 +10,10 @@ import random
 import pandas as pd
 from collections import defaultdict
 
-BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-
 # ---------------- CONFIG ----------------
 DATE_CODE = 20250925
 NUM_WORKERS = 5
 MAX_ERRORS = 10
-TARGET_EVENT_CODES = {"ET00369074"}
-global all_data, fetched_venues
-
 
 IST = timezone(timedelta(hours=5, minutes=30))
 now = datetime.now(IST)
@@ -69,8 +64,8 @@ def get_headers():
 headers = get_headers()
 
 # ---------------- VENUES LOADER ----------------
-def load_all_venues(filename= "venues.json"):
-    with open(os.path.join(BASE_PATH, filename), "r", encoding="utf-8") as f:
+def load_all_venues(path="venues.json"):
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -86,10 +81,7 @@ def format_rgross(value):
 
 
 # ---------------- FETCH DATA ----------------
-def fetch_data(venue_code, target_event_codes=None):
-    if target_event_codes is None:
-        target_event_codes = set()
-
+def fetch_data(venue_code):
     url = f"https://in.bookmyshow.com/api/v2/mobile/showtimes/byvenue?venueCode={venue_code}&dateCode={DATE_CODE}"
     try:
         res = scraper.get(url, headers=headers)
@@ -105,9 +97,13 @@ def fetch_data(venue_code, target_event_codes=None):
 
     api_date = show_details[0].get("Date")
     if str(api_date) != str(DATE_CODE):
-        print(f"⏩ Skipping {venue_code} (date mismatch: {api_date} vs {DATE_CODE})")
+        print(
+            f"⏩ Skipping summary for {venue_code} (date mismatch: {api_date} vs {DATE_CODE})"
+        )
+        # Return empty dict so it's still marked as fetched
         return {}
 
+    # --- process normally ---
     venue_info = show_details[0].get("Venues", {})
     if not venue_info:
         return {}
@@ -116,26 +112,34 @@ def fetch_data(venue_code, target_event_codes=None):
     venue_add = venue_info.get("VenueAdd", "")
     shows_by_movie = defaultdict(list)
 
-    # --- LOOP OVER EVENTS ---
-    for event in show_details[0].get("Event", []):
+    # (rest of your parsing code same as before) ...
+
+    for event in data.get("ShowDetails", [{}])[0].get("Event", []):
         parent_title = event.get("EventTitle", "Unknown")
         parent_event_code = event.get("EventGroup") or event.get("EventCode")
 
         for child in event.get("ChildEvents", []):
-            child_event_code = child.get("EventCode")
-
-            # Skip if neither parent nor child is in target
-            if target_event_codes and child_event_code not in target_event_codes and parent_event_code not in target_event_codes:
-                continue
-
             # Dimension + Language
             dimension = child.get("EventDimension", "").strip()
             language = child.get("EventLanguage", "").strip()
-            parts = [p for p in [dimension, language] if p]
-            movie_title = f"{parent_title} [{' | '.join(parts)}]" if parts else parent_title
+            child_event_code = child.get("EventCode")
+
+            # Clean movie title: Parent + [Dimension | Language]
+            parts = []
+            if dimension:
+                parts.append(dimension)
+            if language:
+                parts.append(language)
+            extra_info = " | ".join(parts)
+
+            if extra_info:
+                movie_title = f"{parent_title} [{extra_info}]"
+            else:
+                movie_title = parent_title
 
             for show in child.get("ShowTimes", []):
                 total = sold = available = gross = 0
+
                 for cat in show.get("Categories", []):
                     seats = int(cat.get("MaxSeats", 0))
                     avail = int(cat.get("SeatsAvail", 0))
@@ -145,27 +149,29 @@ def fetch_data(venue_code, target_event_codes=None):
                     sold += seats - avail
                     gross += (seats - avail) * price
 
-                shows_by_movie[movie_title].append({
-                    "venue_code": venue_code,
-                    "venue": venue_name,
-                    "address": venue_add,
-                    "chain": venue_info.get("VenueCompName", "Unknown"),
-                    "movie": movie_title,
-                    "parent_event_code": parent_event_code,
-                    "child_event_code": child_event_code,
-                    "dimension": dimension,
-                    "language": language,
-                    "time": show.get("ShowTime"),
-                    "session_id": show.get("SessionId"),
-                    "audi": show.get("Attributes", ""),
-                    "total": total,
-                    "sold": sold,
-                    "available": available,
-                    "occupancy": round((sold / total * 100), 2) if total else 0,
-                    "gross": gross,
-                })
-
+                shows_by_movie[movie_title].append(
+                    {
+                        "venue_code": venue_code,
+                        "venue": venue_name,
+                        "address": venue_add,
+                        "chain": venue_info.get("VenueCompName", "Unknown"),  # NEW
+                        "movie": movie_title,
+                        "parent_event_code": parent_event_code,
+                        "child_event_code": child_event_code,
+                        "dimension": dimension,
+                        "language": language,
+                        "time": show.get("ShowTime"),
+                        "session_id": show.get("SessionId"),
+                        "audi": show.get("Attributes", ""),
+                        "total": total,
+                        "sold": sold,
+                        "available": available,
+                        "occupancy": round((sold / total * 100), 2) if total else 0,
+                        "gross": gross,
+                    }
+                )
     return shows_by_movie
+
 
 # ---------------- SUMMARY ----------------
 def compile_summary(all_data, venues_info):
@@ -256,8 +262,8 @@ def dump_progress(all_data, fetched_venues):
         movie_summary = {}
 
     # Load venues info for city/state mapping
-    if os.path.exists("E:\\BMS\\test\\venues.json"):
-        with open("E:\\BMS\\test\\venues.json", "r", encoding="utf-8") as f:
+    if os.path.exists("venues.json"):
+        with open("venues.json", "r", encoding="utf-8") as f:
             venues_info = json.load(f)
     else:
         venues_info = {}
@@ -423,20 +429,20 @@ def dump_progress(all_data, fetched_venues):
             )
 
     # Save updated movie summary
-    with open(os.path.join(BASE_PATH, "movie_summary.json.tmp"), "w", encoding="utf-8") as f:
+    with open("movie_summary.json.tmp", "w", encoding="utf-8") as f:
         json.dump(movie_summary, f, indent=2, ensure_ascii=False)
-    os.replace(os.path.join(BASE_PATH, "movie_summary.json.tmp"), os.path.join(BASE_PATH, "movie_summary.json"))
+    os.replace("movie_summary.json.tmp", "movie_summary.json")
 
     # Save fetched venues
-    with open(os.path.join(BASE_PATH, "fetchedvenues.json.tmp"), "w", encoding="utf-8") as f:
+    with open("fetchedvenues.json.tmp", "w", encoding="utf-8") as f:
         json.dump(list(fetched_venues), f, indent=2)
-    os.replace(os.path.join(BASE_PATH, "fetchedvenues.json.tmp"), os.path.join(BASE_PATH, "fetchedvenues.json"))
+    os.replace("fetchedvenues.json.tmp", "fetchedvenues.json")
 
     # Save processed venues
     processed_venues |= new_venues
-    with open(os.path.join(BASE_PATH, "processed_venues.json.tmp"), "w", encoding="utf-8") as f:
+    with open("processed_venues.json.tmp", "w", encoding="utf-8") as f:
         json.dump(list(processed_venues), f, indent=2)
-    os.replace(os.path.join(BASE_PATH, "processed_venues.json.tmp"), os.path.join(BASE_PATH, "processed_venues.json"))
+    os.replace("processed_venues.json.tmp", "processed_venues.json")
 
     print(
         f"💾 Progress dumped. Venues: {len(fetched_venues)} (New added: {len(new_venues)})"
@@ -444,22 +450,14 @@ def dump_progress(all_data, fetched_venues):
 
 
 # ---------------- FETCH SAFE ----------------
-def fetch_venue_safe(venue_code, target_event_codes=TARGET_EVENT_CODES):
-    """
-    Safely fetch show data for a venue, filtering by multiple event codes.
-    Updates all_data and fetched_venues, and dumps progress.
-    """
+def fetch_venue_safe(venue_code):
     global error_count
-
     with lock:
         if venue_code in fetched_venues:
-            return  # Already fetched
+            return
 
-    # Fetch data for this venue
-    data = fetch_data(venue_code, target_event_codes=target_event_codes)
-
-    if data is None:
-        # Increment error counter safely
+    data = fetch_data(venue_code)
+    if data is None:  # real error
         with lock:
             error_count += 1
             if error_count >= MAX_ERRORS:
@@ -471,28 +469,30 @@ def fetch_venue_safe(venue_code, target_event_codes=TARGET_EVENT_CODES):
         with lock:
             if venue_code not in all_data:
                 all_data[venue_code] = {}
-            # Only add non-empty data
+            # Only add to summary if non-empty
             if data:
                 for movie, shows in data.items():
                     all_data[venue_code][movie] = shows
             fetched_venues.add(venue_code)
-            print(f"✅ Successfully fetched venue: {venue_code} ({len(fetched_venues)} fetched so far)")
+            print(
+                f"✅ Successfully fetched venue: {venue_code} ({len(fetched_venues)} fetched so far)"
+            )
             dump_progress(all_data, fetched_venues)
 
 
 # ---------------- MAIN ----------------
 if __name__ == "__main__":
-    with open(os.path.join(BASE_PATH, "venues.json"), "r", encoding="utf-8") as f:
+    with open("venues.json", "r", encoding="utf-8") as f:
         venues = json.load(f)
 
-    if os.path.exists(os.path.join(BASE_PATH, "fetchedvenues.json")):
-        with open(os.path.join(BASE_PATH, "fetchedvenues.json"), "r", encoding="utf-8") as f:
+    if os.path.exists("fetchedvenues.json"):
+        with open("fetchedvenues.json", "r", encoding="utf-8") as f:
             fetched_venues = set(json.load(f))
     else:
         fetched_venues = set()
 
-    if os.path.exists(os.path.join(BASE_PATH, "venues_data.json")):
-        with open(os.path.join(BASE_PATH, "venues_data.json"), "r", encoding="utf-8") as f:
+    if os.path.exists("venues_data.json"):
+        with open("venues_data.json", "r", encoding="utf-8") as f:
             try:
                 all_data = json.load(f)
             except:
@@ -510,12 +510,12 @@ if __name__ == "__main__":
             pass
 
     # Instead, load the final updated movie_summary.json
-    with open(os.path.join(BASE_PATH, "movie_summary.json"), "r", encoding="utf-8") as f:
+    with open("movie_summary.json", "r", encoding="utf-8") as f:
         movie_summary = json.load(f)
 
     df = pd.DataFrame([{"Movie": k, **v} for k, v in movie_summary.items()])
     df = df.sort_values(by="gross", ascending=False).reset_index(drop=True)
-    df.to_csv(os.path.join(BASE_PATH, "movie_summary.csv"), index=False)
+    df.to_csv("movie_summary.csv", index=False)
 
     def pretty_divider(title=""):
         line = "─" * 25
