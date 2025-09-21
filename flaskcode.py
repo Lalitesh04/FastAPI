@@ -6,6 +6,7 @@ import subprocess
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 # ---------------- CONFIG ----------------
@@ -22,7 +23,6 @@ TEMP_FILES = [
 
 SCRAPER_INTERVAL = 60 * 60  # 1 hour
 
-
 # ---------------- FUNCTIONS ----------------
 def clean_temp_files():
     """Remove temp files before each scrape."""
@@ -30,7 +30,6 @@ def clean_temp_files():
         if os.path.exists(file):
             os.remove(file)
             print(f"🗑 Removed: {file}")
-
 
 def run_scraper_periodically():
     """Run scraper periodically, saving output to data.json."""
@@ -55,7 +54,6 @@ def run_scraper_periodically():
         print(f"⏱ Waiting {SCRAPER_INTERVAL/60} minutes before next run...")
         time.sleep(SCRAPER_INTERVAL)
 
-
 # ---------------- LIFESPAN ----------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -66,9 +64,7 @@ async def lifespan(app: FastAPI):
 
     yield  # App runs here
 
-    # Cleanup logic (if needed later)
     print("🛑 App shutting down...")
-
 
 # ---------------- APP ----------------
 app = FastAPI(
@@ -77,6 +73,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# ---------------- CORS ----------------
+origins = [
+    "http://localhost:3000",  # your frontend URL
+    "https://bookmyshow-api.vercel.app/"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # ["*"] for all origins (less secure)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------------- ROUTES ----------------
 @app.get("/movie-summary")
@@ -95,4 +104,3 @@ def get_movie_summary():
         })
     else:
         raise HTTPException(status_code=404, detail="data.json not found")
-
