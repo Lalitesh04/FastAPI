@@ -85,10 +85,70 @@ def make_city_summary(df):
 
     return summary
 
-city_summary = make_city_summary(df_filtered)
 
 # ======================
-# Print city-wise summary
+# Language + Dimension summary
 # ======================
+def make_lang_dim_summary(df):
+    summary = df.groupby(["language", "dimension"]).agg(
+        totalShows=("venue", "count"),
+        totalGross=("gross", "sum"),
+        totalSold=("sold", "sum"),
+        totalSeats=("total", "sum"),
+        fastfilling=("fastfilling", "sum"),
+        housefull=("housefull", "sum"),
+        avgOccupancy=("occupancy", "mean")
+    ).reset_index()
+
+    # Add grand total row
+    grand_total = pd.DataFrame({
+        "language": ["Grand Total"],
+        "dimension": [""],
+        "totalShows": [summary["totalShows"].sum()],
+        "totalGross": [summary["totalGross"].sum()],
+        "totalSold": [summary["totalSold"].sum()],
+        "totalSeats": [summary["totalSeats"].sum()],
+        "fastfilling": [summary["fastfilling"].sum()],
+        "housefull": [summary["housefull"].sum()],
+        "avgOccupancy": [
+            summary["totalSold"].sum() / summary["totalSeats"].sum() * 100 
+            if summary["totalSeats"].sum() > 0 else 0
+        ]
+    })
+
+    summary = pd.concat([summary, grand_total], ignore_index=True)
+
+    # Round avgOccupancy
+    summary["avgOccupancy"] = summary["avgOccupancy"].round(2).astype(str) + "%"
+
+    # Save numeric gross for sorting
+    summary["_grossNum"] = summary["totalGross"]
+
+    # Format numbers
+    summary["totalGross"] = summary["_grossNum"].apply(format_indian_number)
+    summary["totalSold"] = summary["totalSold"].apply(lambda x: f"{x:,.0f}")
+    summary["totalSeats"] = summary["totalSeats"].apply(lambda x: f"{x:,.0f}")
+
+    # Sort by language and gross
+    body = summary.iloc[:-1].sort_values(
+        by=["language", "_grossNum"], ascending=[True, False]
+    )
+    summary = pd.concat([body, summary.iloc[[-1]]], ignore_index=True)
+
+    # Drop helper column
+    summary = summary.drop(columns=["_grossNum"])
+
+    return summary
+
+
+# ======================
+# Generate & Print Summaries
+# ======================
+city_summary = make_city_summary(df_filtered)
+lang_dim_summary = make_lang_dim_summary(df_filtered)
+
 print("=== City-wise Summary (Grouped by State, Cities by Gross Desc) ===")
 print(tabulate(city_summary, headers="keys", tablefmt="pretty", showindex=False))
+
+print("\n=== Language + Dimension Summary ===")
+print(tabulate(lang_dim_summary, headers="keys", tablefmt="pretty", showindex=False))
