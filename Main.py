@@ -11,7 +11,7 @@ import pandas as pd
 from collections import defaultdict
 
 # ---------------- CONFIG ----------------
-DATE_CODE = 20250925
+DATE_CODE = 20251002
 NUM_WORKERS = 5
 MAX_ERRORS = 10
 
@@ -79,6 +79,19 @@ def format_rgross(value):
     else:
         return str(round(value, 2))
 
+ALL_VENUES = load_all_venues()
+# ---------------- FETCH DATA ----------------
+ALL_SHOWS = []
+
+# Load saved ALL_SHOWS if present  # NEW
+if os.path.exists("all_shows.json"):
+    with open("all_shows.json", "r", encoding="utf-8") as f:
+        try:
+            ALL_SHOWS = json.load(f)
+            print(f"📂 Loaded {len(ALL_SHOWS)} saved shows from all_shows.json")
+        except:
+            ALL_SHOWS = []
+
 
 # ---------------- FETCH DATA ----------------
 def fetch_data(venue_code):
@@ -97,13 +110,9 @@ def fetch_data(venue_code):
 
     api_date = show_details[0].get("Date")
     if str(api_date) != str(DATE_CODE):
-        print(
-            f"⏩ Skipping summary for {venue_code} (date mismatch: {api_date} vs {DATE_CODE})"
-        )
-        # Return empty dict so it's still marked as fetched
+        print(f"⏩ Skipping summary for {venue_code} (date mismatch: {api_date} vs {DATE_CODE})")
         return {}
 
-    # --- process normally ---
     venue_info = show_details[0].get("Venues", {})
     if not venue_info:
         return {}
@@ -112,34 +121,25 @@ def fetch_data(venue_code):
     venue_add = venue_info.get("VenueAdd", "")
     shows_by_movie = defaultdict(list)
 
-    # (rest of your parsing code same as before) ...
-
     for event in data.get("ShowDetails", [{}])[0].get("Event", []):
         parent_title = event.get("EventTitle", "Unknown")
         parent_event_code = event.get("EventGroup") or event.get("EventCode")
 
         for child in event.get("ChildEvents", []):
-            # Dimension + Language
             dimension = child.get("EventDimension", "").strip()
             language = child.get("EventLanguage", "").strip()
             child_event_code = child.get("EventCode")
 
-            # Clean movie title: Parent + [Dimension | Language]
             parts = []
             if dimension:
                 parts.append(dimension)
             if language:
                 parts.append(language)
             extra_info = " | ".join(parts)
-
-            if extra_info:
-                movie_title = f"{parent_title} [{extra_info}]"
-            else:
-                movie_title = parent_title
+            movie_title = f"{parent_title} [{extra_info}]" if extra_info else parent_title
 
             for show in child.get("ShowTimes", []):
                 total = sold = available = gross = 0
-
                 for cat in show.get("Categories", []):
                     seats = int(cat.get("MaxSeats", 0))
                     avail = int(cat.get("SeatsAvail", 0))
@@ -149,27 +149,34 @@ def fetch_data(venue_code):
                     sold += seats - avail
                     gross += (seats - avail) * price
 
-                shows_by_movie[movie_title].append(
-                    {
-                        "venue_code": venue_code,
-                        "venue": venue_name,
-                        "address": venue_add,
-                        "chain": venue_info.get("VenueCompName", "Unknown"),  # NEW
-                        "movie": movie_title,
-                        "parent_event_code": parent_event_code,
-                        "child_event_code": child_event_code,
-                        "dimension": dimension,
-                        "language": language,
-                        "time": show.get("ShowTime"),
-                        "session_id": show.get("SessionId"),
-                        "audi": show.get("Attributes", ""),
-                        "total": total,
-                        "sold": sold,
-                        "available": available,
-                        "occupancy": round((sold / total * 100), 2) if total else 0,
-                        "gross": gross,
-                    }
-                )
+                show_record = {
+                    "venue_code": venue_code,
+                    "venue": venue_name,
+                    "address": venue_add,
+                    "city": ALL_VENUES.get(venue_code, {}).get("City", "Unknown"),
+                    "state": ALL_VENUES.get(venue_code, {}).get("State", "Unknown"),
+                    "chain": ALL_VENUES.get(venue_code, {}).get("VenueCompName", "Unknown"),
+                    "movie": movie_title,
+                    "parent_event_code": parent_event_code,
+                    "child_event_code": child_event_code,
+                    "dimension": dimension,
+                    "language": language,
+                    "time": show.get("ShowTime"),
+                    "session_id": show.get("SessionId"),
+                    "audi": show.get("Attributes", ""),
+                    "total": total,
+                    "sold": sold,
+                    "available": available,
+                    "occupancy": round((sold / total * 100), 2) if total else 0,
+                    "gross": gross,
+                }
+
+                shows_by_movie[movie_title].append(show_record)
+
+                # Append to global ALL_SHOWS  # NEW 
+                if parent_event_code == "EG00376057":  # They Call Him OG - EG00376057
+                    ALL_SHOWS.append(show_record)
+
     return shows_by_movie
 
 
@@ -299,7 +306,7 @@ def dump_progress(all_data, fetched_venues):
                     "housefull": 0,
                     "occupancy": 0.0,
                     "details": [],
-                    "Chain_details": [],  # <-- add this
+                    "Chain_details": [],
                 }
 
             # --- Update top-level movie stats ---
@@ -342,7 +349,7 @@ def dump_progress(all_data, fetched_venues):
                 movie_summary[movie]["details"].append(city_block)
                 movie_summary[movie]["cities"] += 1  # new city found
 
-            city_block["venues"] += 1  # add this venue under that city
+            city_block["venues"] += 1
 
             for show in shows:
                 sold = show["sold"]
@@ -359,15 +366,13 @@ def dump_progress(all_data, fetched_venues):
                 elif occ >= 98:
                     city_block["housefull"] += 1
 
-            # --- Update city occupancy ---
             if city_block["totalSeats"] > 0:
                 city_block["occupancy"] = round(
                     city_block["sold"] / city_block["totalSeats"] * 100, 2
                 )
 
-                # --- Update chain-level ---
+            # --- Update chain-level ---
             chain = shows[0].get("chain", "Unknown")
-
             chain_block = None
             for d in movie_summary[movie]["Chain_details"]:
                 if d["chain"] == chain:
@@ -414,38 +419,38 @@ def dump_progress(all_data, fetched_venues):
     for movie, data in movie_summary.items():
         if data["totalSeats"] > 0:
             data["occupancy"] = round(data["sold"] / data["totalSeats"] * 100, 2)
-
-    # --- Update movie-level stats & sort city blocks ---
-    for movie, data in movie_summary.items():
-        if data["totalSeats"] > 0:
-            data["occupancy"] = round(data["sold"] / data["totalSeats"] * 100, 2)
         else:
             data["occupancy"] = 0.0
 
-        # sort city blocks by gross (high → low)
         if "details" in data:
             data["details"] = sorted(
                 data["details"], key=lambda x: x["gross"], reverse=True
             )
 
-    # Save updated movie summary
+    # --- Save updated movie summary ---
     with open("movie_summary.json.tmp", "w", encoding="utf-8") as f:
         json.dump(movie_summary, f, indent=2, ensure_ascii=False)
     os.replace("movie_summary.json.tmp", "movie_summary.json")
 
-    # Save fetched venues
+    # --- Save fetched venues ---
     with open("fetchedvenues.json.tmp", "w", encoding="utf-8") as f:
         json.dump(list(fetched_venues), f, indent=2)
     os.replace("fetchedvenues.json.tmp", "fetchedvenues.json")
 
-    # Save processed venues
+    # --- Save processed venues ---
     processed_venues |= new_venues
     with open("processed_venues.json.tmp", "w", encoding="utf-8") as f:
         json.dump(list(processed_venues), f, indent=2)
     os.replace("processed_venues.json.tmp", "processed_venues.json")
 
+    # --- Save ALL_SHOWS snapshot (new) ---
+    with open("all_shows.json.tmp", "w", encoding="utf-8") as f:
+        json.dump(ALL_SHOWS, f, indent=2, ensure_ascii=False)
+    os.replace("all_shows.json.tmp", "all_shows.json")
+
     print(
-        f"💾 Progress dumped. Venues: {len(fetched_venues)} (New added: {len(new_venues)})"
+        f"💾 Progress dumped. Venues: {len(fetched_venues)} "
+        f"(New added: {len(new_venues)}), Shows saved: {len(ALL_SHOWS)}"
     )
 
 
