@@ -5,6 +5,18 @@ from tabulate import tabulate
 file_path = "all_shows.json"
 filtered_rows = []
 
+# Function to format numbers in Indian style (Cr, Lakh, Thousand)
+def format_indian_number(num):
+    num = float(num)
+    if num >= 1e7:  # Crores
+        return f"{num/1e7:.2f} Cr"
+    elif num >= 1e5:  # Lakhs
+        return f"{num/1e5:.2f} L"
+    elif num >= 1e3:  # Thousands
+        return f"{num/1e3:.2f} K"
+    else:
+        return f"{num:.2f}"
+
 # Stream parse JSON
 with open(file_path, "r", encoding="utf-8") as f:
     for item in ijson.items(f, "item"):
@@ -21,96 +33,53 @@ numeric_cols = ["total", "sold", "gross", "occupancy", "fastfilling", "housefull
 for col in numeric_cols:
     df_filtered[col] = pd.to_numeric(df_filtered[col], errors="coerce").fillna(0)
 
-# ----------------------
-# 1. City-wise summary
-# ----------------------
-city_summary = df_filtered.groupby("city").agg(
-    totalShows=("venue", "count"),
-    totalGross=("gross", "sum"),
-    totalSold=("sold", "sum"),
-    totalSeats=("total", "sum"),
-    fastfilling=("fastfilling", "sum"),
-    housefull=("housefull", "sum"),
-    avgOccupancy=("occupancy", "mean")
-).reset_index()
+# ======================
+# Helper function
+# ======================
+def make_summary(df, group_col, label):
+    summary = df.groupby(group_col).agg(
+        totalShows=("venue", "count"),
+        totalGross=("gross", "sum"),
+        totalSold=("sold", "sum"),
+        totalSeats=("total", "sum"),
+        fastfilling=("fastfilling", "sum"),
+        housefull=("housefull", "sum"),
+        avgOccupancy=("occupancy", "mean")
+    ).reset_index()
 
-city_grand_total = pd.DataFrame({
-    "city": ["Grand Total"],
-    "totalShows": [city_summary["totalShows"].sum()],
-    "totalGross": [city_summary["totalGross"].sum()],
-    "totalSold": [city_summary["totalSold"].sum()],
-    "totalSeats": [city_summary["totalSeats"].sum()],
-    "fastfilling": [city_summary["fastfilling"].sum()],
-    "housefull": [city_summary["housefull"].sum()],
-    "avgOccupancy": [city_summary["totalSold"].sum() / city_summary["totalSeats"].sum() * 100 if city_summary["totalSeats"].sum() > 0 else 0]
-})
+    # Add grand total row
+    grand_total = pd.DataFrame({
+        group_col: ["Grand Total"],
+        "totalShows": [summary["totalShows"].sum()],
+        "totalGross": [summary["totalGross"].sum()],
+        "totalSold": [summary["totalSold"].sum()],
+        "totalSeats": [summary["totalSeats"].sum()],
+        "fastfilling": [summary["fastfilling"].sum()],
+        "housefull": [summary["housefull"].sum()],
+        "avgOccupancy": [summary["totalSold"].sum() / summary["totalSeats"].sum() * 100 if summary["totalSeats"].sum() > 0 else 0]
+    })
 
-city_summary = pd.concat([city_summary, city_grand_total], ignore_index=True)
-city_summary["avgOccupancy"] = city_summary["avgOccupancy"].round(2).astype(str) + "%"
+    summary = pd.concat([summary, grand_total], ignore_index=True)
 
-city_summary.to_csv("city_summary.csv", index=False)
+    # Round avgOccupancy
+    summary["avgOccupancy"] = summary["avgOccupancy"].round(2).astype(str) + "%"
 
-# ----------------------
-# 2. State-wise summary
-# ----------------------
-state_summary = df_filtered.groupby("state").agg(
-    totalShows=("venue", "count"),
-    totalGross=("gross", "sum"),
-    totalSold=("sold", "sum"),
-    totalSeats=("total", "sum"),
-    fastfilling=("fastfilling", "sum"),
-    housefull=("housefull", "sum"),
-    avgOccupancy=("occupancy", "mean")
-).reset_index()
+    # Format numbers
+    summary["totalGross"] = summary["totalGross"].apply(format_indian_number)
+    summary["totalSold"] = summary["totalSold"].apply(lambda x: f"{x:,.0f}")
+    summary["totalSeats"] = summary["totalSeats"].apply(lambda x: f"{x:,.0f}")
 
-state_grand_total = pd.DataFrame({
-    "state": ["Grand Total"],
-    "totalShows": [state_summary["totalShows"].sum()],
-    "totalGross": [state_summary["totalGross"].sum()],
-    "totalSold": [state_summary["totalSold"].sum()],
-    "totalSeats": [state_summary["totalSeats"].sum()],
-    "fastfilling": [state_summary["fastfilling"].sum()],
-    "housefull": [state_summary["housefull"].sum()],
-    "avgOccupancy": [state_summary["totalSold"].sum() / state_summary["totalSeats"].sum() * 100 if state_summary["totalSeats"].sum() > 0 else 0]
-})
+    # Sort by Gross (keeping grand total at bottom)
+    summary = summary.iloc[:-1].sort_values(by="totalGross", ascending=False, key=lambda col: col.str.replace("[^0-9.]", "", regex=True).astype(float)).append(summary.iloc[-1])
 
-state_summary = pd.concat([state_summary, state_grand_total], ignore_index=True)
-state_summary["avgOccupancy"] = state_summary["avgOccupancy"].round(2).astype(str) + "%"
+    # Export CSV
+    summary.to_csv(f"{label}_summary.csv", index=False)
 
-state_summary.to_csv("state_summary.csv", index=False)
+    return summary
 
-# ----------------------
-# 3. Language-wise summary
-# ----------------------
-language_summary = df_filtered.groupby("language").agg(
-    totalShows=("venue", "count"),
-    totalGross=("gross", "sum"),
-    totalSold=("sold", "sum"),
-    totalSeats=("total", "sum"),
-    fastfilling=("fastfilling", "sum"),
-    housefull=("housefull", "sum"),
-    avgOccupancy=("occupancy", "mean")
-).reset_index()
-
-language_grand_total = pd.DataFrame({
-    "language": ["Grand Total"],
-    "totalShows": [language_summary["totalShows"].sum()],
-    "totalGross": [language_summary["totalGross"].sum()],
-    "totalSold": [language_summary["totalSold"].sum()],
-    "totalSeats": [language_summary["totalSeats"].sum()],
-    "fastfilling": [language_summary["fastfilling"].sum()],
-    "housefull": [language_summary["housefull"].sum()],
-    "avgOccupancy": [language_summary["totalSold"].sum() / language_summary["totalSeats"].sum() * 100 if language_summary["totalSeats"].sum() > 0 else 0]
-})
-
-language_summary = pd.concat([language_summary, language_grand_total], ignore_index=True)
-language_summary["avgOccupancy"] = language_summary["avgOccupancy"].round(2).astype(str) + "%"
-
-language_summary.to_csv("language_summary.csv", index=False)
-
-# ----------------------
+# ======================
 # Print all tables
-# ----------------------
+# ======================
 print("=== City-wise Summary ===")
 print(tabulate(city_summary, headers="keys", tablefmt="pretty", showindex=False))
 print("\n=== State-wise Summary ===")
