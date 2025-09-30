@@ -20,12 +20,10 @@ def format_indian_number(num):
 # Stream parse JSON
 with open(file_path, "r", encoding="utf-8") as f:
     for item in ijson.items(f, "item"):
-        # Add fastfilling/housefull flags
         item["fastfilling"] = 1 if 50 <= item["occupancy"] < 98 else 0
         item["housefull"] = 1 if item["occupancy"] >= 98 else 0
         filtered_rows.append(item)
 
-# Convert filtered rows to DataFrame
 df_filtered = pd.DataFrame(filtered_rows)
 
 # Ensure numeric columns are correct
@@ -36,7 +34,7 @@ for col in numeric_cols:
 # ======================
 # Helper function
 # ======================
-def make_summary(df, group_col, label):
+def make_summary(df, group_col):
     summary = df.groupby(group_col).agg(
         totalShows=("venue", "count"),
         totalGross=("gross", "sum"),
@@ -47,7 +45,7 @@ def make_summary(df, group_col, label):
         avgOccupancy=("occupancy", "mean")
     ).reset_index()
 
-    # Add grand total row
+    # Grand total row
     grand_total = pd.DataFrame({
         group_col: ["Grand Total"],
         "totalShows": [summary["totalShows"].sum()],
@@ -56,7 +54,10 @@ def make_summary(df, group_col, label):
         "totalSeats": [summary["totalSeats"].sum()],
         "fastfilling": [summary["fastfilling"].sum()],
         "housefull": [summary["housefull"].sum()],
-        "avgOccupancy": [summary["totalSold"].sum() / summary["totalSeats"].sum() * 100 if summary["totalSeats"].sum() > 0 else 0]
+        "avgOccupancy": [
+            summary["totalSold"].sum() / summary["totalSeats"].sum() * 100 
+            if summary["totalSeats"].sum() > 0 else 0
+        ]
     })
 
     summary = pd.concat([summary, grand_total], ignore_index=True)
@@ -64,29 +65,38 @@ def make_summary(df, group_col, label):
     # Round avgOccupancy
     summary["avgOccupancy"] = summary["avgOccupancy"].round(2).astype(str) + "%"
 
+    # Save numeric gross for sorting
+    summary["_grossNum"] = summary["totalGross"]
+
     # Format numbers
-    summary["totalGross"] = summary["totalGross"].apply(format_indian_number)
+    summary["totalGross"] = summary["_grossNum"].apply(format_indian_number)
     summary["totalSold"] = summary["totalSold"].apply(lambda x: f"{x:,.0f}")
     summary["totalSeats"] = summary["totalSeats"].apply(lambda x: f"{x:,.0f}")
 
-    # Sort by Gross (keeping grand total at bottom)
-    summary = summary.iloc[:-1].sort_values(by="totalGross", ascending=False, key=lambda col: col.str.replace("[^0-9.]", "", regex=True).astype(float)).append(summary.iloc[-1])
+    # Sort by numeric gross (keeping grand total at bottom)
+    body = summary.iloc[:-1].sort_values(by="_grossNum", ascending=False)
+    summary = pd.concat([body, summary.iloc[[-1]]], ignore_index=True)
+
+    # Drop helper col
+    summary = summary.drop(columns=["_grossNum"])
 
     return summary
 
 # ======================
 # Generate summaries
 # ======================
-city_summary = make_summary(df_filtered, "city", "city")
-state_summary = make_summary(df_filtered, "state", "state")
-language_summary = make_summary(df_filtered, "language", "language")
+city_summary = make_summary(df_filtered, "city")
+state_summary = make_summary(df_filtered, "state")
+language_summary = make_summary(df_filtered, "language")
 
 # ======================
 # Print all tables
 # ======================
 print("=== City-wise Summary ===")
 print(tabulate(city_summary, headers="keys", tablefmt="pretty", showindex=False))
+
 print("\n=== State-wise Summary ===")
 print(tabulate(state_summary, headers="keys", tablefmt="pretty", showindex=False))
+
 print("\n=== Language-wise Summary ===")
 print(tabulate(language_summary, headers="keys", tablefmt="pretty", showindex=False))
