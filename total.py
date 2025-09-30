@@ -72,10 +72,14 @@ def make_summary(df, group_col, label):
     # Sort by Gross (keeping grand total at bottom)
     summary = summary.iloc[:-1].sort_values(by="totalGross", ascending=False, key=lambda col: col.str.replace("[^0-9.]", "", regex=True).astype(float)).append(summary.iloc[-1])
 
-    # Export CSV
-    summary.to_csv(f"{label}_summary.csv", index=False)
-
     return summary
+
+# ======================
+# Generate summaries
+# ======================
+city_summary = make_summary(df_filtered, "city", "city")
+state_summary = make_summary(df_filtered, "state", "state")
+language_summary = make_summary(df_filtered, "language", "language")
 
 # ======================
 # Print all tables
