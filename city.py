@@ -32,7 +32,7 @@ for col in numeric_cols:
     df_filtered[col] = pd.to_numeric(df_filtered[col], errors="coerce").fillna(0)
 
 # ======================
-# City-wise summary grouped by state
+# City-wise summary grouped by state and sorted by gross
 # ======================
 def make_city_summary(df):
     summary = df.groupby(["state", "city"]).agg(
@@ -55,7 +55,10 @@ def make_city_summary(df):
         "totalSeats": [summary["totalSeats"].sum()],
         "fastfilling": [summary["fastfilling"].sum()],
         "housefull": [summary["housefull"].sum()],
-        "avgOccupancy": [summary["totalSold"].sum() / summary["totalSeats"].sum() * 100 if summary["totalSeats"].sum() > 0 else 0]
+        "avgOccupancy": [
+            summary["totalSold"].sum() / summary["totalSeats"].sum() * 100 
+            if summary["totalSeats"].sum() > 0 else 0
+        ]
     })
 
     summary = pd.concat([summary, grand_total], ignore_index=True)
@@ -71,7 +74,7 @@ def make_city_summary(df):
     summary["totalSold"] = summary["totalSold"].apply(lambda x: f"{x:,.0f}")
     summary["totalSeats"] = summary["totalSeats"].apply(lambda x: f"{x:,.0f}")
 
-    # Sort by state, then by gross descending within each state
+    # Sort by state, then within state by gross descending
     body = summary.iloc[:-1].sort_values(
         by=["state", "_grossNum"], ascending=[True, False]
     )
@@ -87,5 +90,5 @@ city_summary = make_city_summary(df_filtered)
 # ======================
 # Print city-wise summary
 # ======================
-print("=== City-wise Summary (Grouped by State) ===")
+print("=== City-wise Summary (Grouped by State, Cities by Gross Desc) ===")
 print(tabulate(city_summary, headers="keys", tablefmt="pretty", showindex=False))
