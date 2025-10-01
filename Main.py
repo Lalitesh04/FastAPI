@@ -11,7 +11,14 @@ import pandas as pd
 from collections import defaultdict
 
 # ---------------- CONFIG ----------------
-DATE_CODE = 20251002
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--date", type=str, required=True, help="Enter the date in YYYY-MM-DD format")
+args = parser.parse_args()
+
+print(f"Fetching box office data for: {args.date}")
+
 NUM_WORKERS = 5
 MAX_ERRORS = 10
 
@@ -641,3 +648,4 @@ if __name__ == "__main__":
     print("✅ Movie summary saved to movie_summary.csv")
     dump_progress(all_data, fetched_venues)
     print("✅ Final progress saved.")
+
